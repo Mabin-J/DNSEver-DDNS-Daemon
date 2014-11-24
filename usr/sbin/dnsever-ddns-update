@@ -1,0 +1,87 @@
+#!/bin/bash
+#Reference: http://stackoverflow.com/a/20815951
+
+shopt -s extglob
+
+ddns_config="/etc/dnsever/ddns.conf" # set the actual path name of your (DOS or Unix) config file
+ddns_host_path="/etc/dnsever/ddns-host.d"
+wget="/usr/bin/wget"
+target_url="http://dyna.dnsever.com/update.php"
+
+function read_config {
+	configfile="$1"
+	tr -d '\r' < $configfile > /tmp/_ddns.tmp
+	while IFS='= ' read lhs rhs
+	do
+		if [[ ! $lhs =~ ^\ *# && -n $lhs ]]; then
+			rhs="${rhs%%\#*}"    # Del in line right comments
+			rhs="${rhs%%*( )}"   # Del trailing spaces
+			rhs="${rhs%\"*}"     # Del opening string quotes 
+			rhs="${rhs#\"*}"     # Del closing string quotes 
+			eval $lhs="$rhs"
+		fi
+	done < /tmp/_ddns.tmp
+
+	rm /tmp/_ddns.tmp
+}
+
+
+
+read_config $ddns_config
+
+cmdline_base="$wget -O - --http-user=$username --http-passwd=$auth_code $target_url?"
+cmdline_onetime=""
+cmdline_loop=""
+
+host_filelist=`ls $ddns_host_path/*.conf`
+
+
+for confpath in $host_filelist
+do
+	read_config $confpath
+	if [ $ip == "auto" ] 
+	then
+		cmdline_loop="$cmdline_loop""host[$hostname]&"
+	else
+		cmdline_onetime="$cmdline_onetime""host[$hostname]=$ip&"
+	fi
+done
+
+if [ $cmdline_onetime ]
+then
+	cmdline_onetime=$cmdline_base${cmdline_onetime%%[^(.*).$]}
+	echo $cmdline_onetime
+fi
+
+if [ $cmdline_loop ]
+then
+	cmdline_loop=$cmdline_base${cmdline_loop%%[^(.*).$]}
+	echo $cmdline_loop
+fi
+
+
+
+if [ $1 ]
+then
+	if [ $1 == "--daemon" ]
+	then
+		if [ $cmdline_onetime ]
+		then
+			$cmdline_onetime > /dev/null
+		fi
+
+		while true
+		do
+			$cmdline_loop > /dev/null
+			sleep $update_period
+		done
+	else
+		$cmdline_loop
+	fi
+else
+	if [ $cmdline_onetime ]
+	then
+		$cmdline_onetime
+	fi
+	$cmdline_loop
+fi
